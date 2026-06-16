@@ -4,6 +4,7 @@ import helmet from 'helmet';
 import { getDb } from './db.js';
 import authRoutes from './routes/auth.js';
 import premiumRoutes from './routes/premium.js';
+import adminRoutes from './routes/admin.js';
 
 const PORT = parseInt(process.env.PORT || '3456', 10);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -21,6 +22,7 @@ app.get('/api/health', (_req, res) => {
 
 app.use('/api/auth', authRoutes);
 app.use('/api/premium', premiumRoutes);
+app.use('/api/admin', adminRoutes);
 
 getDb();
 
