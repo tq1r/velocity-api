@@ -36,7 +36,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction) {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as { sessionId: string; userId: string };
     const db = getDb();
-    const session = db.prepare('SELECT * FROM sessions WHERE id = ? AND token = ? AND expires_at > datetime(\'now\')').get(payload.sessionId, token) as any;
+    const session = db.prepare('SELECT * FROM sessions WHERE id = ? AND expires_at > datetime(\'now\')').get(payload.sessionId) as any;
     if (!session) {
       res.status(401).json({ error: 'Session expired or invalid' });
       return;
@@ -83,7 +83,7 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction) {
   try {
     const payload = jwt.verify(token, JWT_SECRET) as { sessionId: string; userId: string };
     const db = getDb();
-    const session = db.prepare('SELECT * FROM sessions WHERE id = ? AND token = ? AND expires_at > datetime(\'now\')').get(payload.sessionId, token) as any;
+    const session = db.prepare('SELECT * FROM sessions WHERE id = ? AND expires_at > datetime(\'now\')').get(payload.sessionId) as any;
     if (session) {
       const user = db.prepare('SELECT * FROM users WHERE id = ?').get(session.user_id) as AuthUser | undefined;
       if (user) req.user = user;
