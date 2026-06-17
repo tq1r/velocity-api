@@ -13,15 +13,21 @@ const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
 const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
 const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3456}`;
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:1420';
 
 router.get('/github', (req, res) => {
   const state = uuid();
+  const redirect = (req.query.redirect as string) || FRONTEND_URL;
   const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${BASE_URL}/api/auth/github/callback&state=${state}&scope=read:user,user:email`;
+  res.cookie('auth_redirect', redirect, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
+  res.cookie('auth_state', state, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
   res.redirect(url);
 });
 
 router.get('/github/callback', async (req, res) => {
-  const { code, state } = req.query;
+  const { code } = req.query;
+  const stateCookie = req.cookies?.auth_state;
+  const redirectUrl = req.cookies?.auth_redirect || FRONTEND_URL;
   if (!code || typeof code !== 'string') {
     res.status(400).send('Missing code');
     return;
@@ -35,7 +41,7 @@ router.get('/github/callback', async (req, res) => {
     });
     const tokenData = await tokenRes.json() as any;
     if (!tokenData.access_token) {
-      res.status(400).send('Failed to get access token');
+      res.redirect(`${redirectUrl}?error=oauth_failed`);
       return;
     }
 
@@ -64,14 +70,15 @@ router.get('/github/callback', async (req, res) => {
         .run(userId, String(ghUser.id), primaryEmail || '', ghUser.login || '', ghUser.avatar_url || '');
     }
 
-    const token = uuid();
+    const sessionToken = uuid();
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     const sessionId = uuid();
     db.prepare('INSERT INTO sessions (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)')
-      .run(sessionId, userId, token, expiresAt);
+      .run(sessionId, userId, sessionToken, expiresAt);
 
-    const jwtToken = jwt.sign({ sessionId, userId }, JWT_SECRET, { expiresIn: '30d' });
-    res.redirect(`${BASE_URL}/api/auth/success?token=${jwtToken}`);
+    const jwtToken = jwt.sign({ sessionId, userId, githubToken: tokenData.access_token }, JWT_SECRET, { expiresIn: '30d' });
+    const separator = redirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${redirectUrl}${separator}token=${jwtToken}`);
   } catch (err) {
     console.error('GitHub OAuth error:', err);
     res.status(500).send('OAuth failed');
@@ -80,12 +87,16 @@ router.get('/github/callback', async (req, res) => {
 
 router.get('/google', (req, res) => {
   const state = uuid();
+  const redirect = (req.query.redirect as string) || FRONTEND_URL;
   const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${BASE_URL}/api/auth/google/callback&response_type=code&scope=openid%20profile%20email&state=${state}`;
+  res.cookie('auth_redirect', redirect, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
+  res.cookie('auth_state', state, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
   res.redirect(url);
 });
 
 router.get('/google/callback', async (req, res) => {
   const { code } = req.query;
+  const redirectUrl = req.cookies?.auth_redirect || FRONTEND_URL;
   if (!code || typeof code !== 'string') {
     res.status(400).send('Missing code');
     return;
@@ -99,7 +110,7 @@ router.get('/google/callback', async (req, res) => {
     });
     const tokenData = await tokenRes.json() as any;
     if (!tokenData.access_token) {
-      res.status(400).send('Failed to get access token');
+      res.redirect(`${redirectUrl}?error=oauth_failed`);
       return;
     }
 
@@ -122,27 +133,19 @@ router.get('/google/callback', async (req, res) => {
         .run(userId, String(googleUser.id), googleUser.email || '', googleUser.name || '', googleUser.picture || '');
     }
 
-    const token = uuid();
+    const sessionToken = uuid();
     const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
     const sessionId = uuid();
     db.prepare('INSERT INTO sessions (id, user_id, token, expires_at) VALUES (?, ?, ?, ?)')
-      .run(sessionId, userId, token, expiresAt);
+      .run(sessionId, userId, sessionToken, expiresAt);
 
     const jwtToken = jwt.sign({ sessionId, userId }, JWT_SECRET, { expiresIn: '30d' });
-    res.redirect(`${BASE_URL}/api/auth/success?token=${jwtToken}`);
+    const separator = redirectUrl.includes('?') ? '&' : '?';
+    res.redirect(`${redirectUrl}${separator}token=${jwtToken}`);
   } catch (err) {
     console.error('Google OAuth error:', err);
     res.status(500).send('OAuth failed');
   }
-});
-
-router.get('/success', (req, res) => {
-  const token = req.query.token as string;
-  if (!token) {
-    res.status(400).send('Missing token');
-    return;
-  }
-  res.send(`<html><body><script>window.opener?.postMessage({ type: 'velocity-auth', token: '${token}' }, '*'); window.close();</script><p>Authentication successful! You can close this tab.</p></body></html>`);
 });
 
 router.get('/me', requireAuth, (req, res) => {
