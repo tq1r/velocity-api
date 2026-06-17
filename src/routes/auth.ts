@@ -16,20 +16,25 @@ const BASE_URL = process.env.BASE_URL || `http://localhost:${process.env.PORT ||
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:1420';
 
 router.get('/github', (req, res) => {
-  const state = uuid();
   const redirect = (req.query.redirect as string) || FRONTEND_URL;
-  const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${BASE_URL}/api/auth/github/callback&state=${state}&scope=read:user,user:email`;
-  res.cookie('auth_redirect', redirect, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
-  res.cookie('auth_state', state, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
+  const state = JSON.stringify({ csrf: uuid(), redirect });
+  const encodedState = Buffer.from(state).toString('base64');
+  const url = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${BASE_URL}/api/auth/github/callback&state=${encodedState}&scope=read:user,user:email`;
+  res.cookie('auth_state', encodedState, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
   res.redirect(url);
 });
 
 router.get('/github/callback', async (req, res) => {
-  const { code } = req.query;
-  const stateCookie = req.cookies?.auth_state;
-  const redirectUrl = req.cookies?.auth_redirect || FRONTEND_URL;
+  const { code, state: stateParam } = req.query;
+  let redirectUrl = FRONTEND_URL;
+  try {
+    if (stateParam && typeof stateParam === 'string') {
+      const decoded = JSON.parse(Buffer.from(stateParam, 'base64').toString());
+      if (decoded.redirect) redirectUrl = decoded.redirect;
+    }
+  } catch {}
   if (!code || typeof code !== 'string') {
-    res.status(400).send('Missing code');
+    res.redirect(`${redirectUrl}?error=missing_code`);
     return;
   }
 
@@ -86,19 +91,25 @@ router.get('/github/callback', async (req, res) => {
 });
 
 router.get('/google', (req, res) => {
-  const state = uuid();
   const redirect = (req.query.redirect as string) || FRONTEND_URL;
-  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${BASE_URL}/api/auth/google/callback&response_type=code&scope=openid%20profile%20email&state=${state}`;
-  res.cookie('auth_redirect', redirect, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
-  res.cookie('auth_state', state, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
+  const state = JSON.stringify({ csrf: uuid(), redirect });
+  const encodedState = Buffer.from(state).toString('base64');
+  const url = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${GOOGLE_CLIENT_ID}&redirect_uri=${BASE_URL}/api/auth/google/callback&response_type=code&scope=openid%20profile%20email&state=${encodedState}`;
+  res.cookie('auth_state', encodedState, { httpOnly: true, sameSite: 'none', secure: true, maxAge: 300000 });
   res.redirect(url);
 });
 
 router.get('/google/callback', async (req, res) => {
-  const { code } = req.query;
-  const redirectUrl = req.cookies?.auth_redirect || FRONTEND_URL;
+  const { code, state: stateParam } = req.query;
+  let redirectUrl = FRONTEND_URL;
+  try {
+    if (stateParam && typeof stateParam === 'string') {
+      const decoded = JSON.parse(Buffer.from(stateParam, 'base64').toString());
+      if (decoded.redirect) redirectUrl = decoded.redirect;
+    }
+  } catch {}
   if (!code || typeof code !== 'string') {
-    res.status(400).send('Missing code');
+    res.redirect(`${redirectUrl}?error=missing_code`);
     return;
   }
 
